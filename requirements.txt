@@ -4,7 +4,8 @@ numpy
 mne
 pandas
 matplotlib
-sklearn
+scikit-learn
+seaborn
 mne[data]
 tqdm
 PyQt5
@@ -12,5 +13,22 @@ EntropyHub
 ipykernel
 antropy
 tabulate
-
+pyedflib
+dit
+mne-features
+mne-icalabel
+mne-connectivity
+mne-qt-browser
+pyvistaqt
+nilearn
+spectral_connectivity
+vmdpy
+pyentrp
+autoreject
+nolds
+neurokit2
+pyeeg
+interpret
+dash
+plotly
 #pyinform-0.2.0 (entropies calculation)

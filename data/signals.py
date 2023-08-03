@@ -14,6 +14,11 @@ def load_clean_cnt(filename: str, channels: List[str]):
     cnt.pick_channels(channels)
     return cnt
 
+def reference_data(raw, reference):
+    raw.set_eeg_reference(ref_channels=reference, projection=False, ch_type='eeg', verbose=None)
+    # set_eeg_reference(ref_channels='average', projection=False, ch_type='auto', forward=None, verbose=None)
+
+    return raw
 
 def signal_crop(signal: BaseRaw, freq: float, signal_offset: float, signal_duration_wanted: float):
     signal_total_duration = floor(len(signal) / freq)

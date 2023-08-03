@@ -4,6 +4,15 @@ from sklearn.model_selection import GridSearchCV
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.svm import SVC
+#import preprocessing as pre
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import permutation_test_score
+import matplotlib.pyplot as plt
+from sklearn import metrics
+import plotly.express as px
+from sklearn import preprocessing
 
 PAPER_G = 2 ** (-5)
 PAPER_C = 0.5  # 2 ** (-1)
