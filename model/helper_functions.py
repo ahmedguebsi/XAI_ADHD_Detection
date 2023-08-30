@@ -113,6 +113,23 @@ def dict_to_string(dictionary: dict):
         return ""
     return "___".join(map(lambda key_value: "_".join([str(key_value[0]), str(key_value[1])]), pairs))
 
+class SocketConcatenator(object):
+    """
+    Class adds an abillity to write to mulitple sockets
+    For example, write both to stdout and to a file
+    """
+
+    def __init__(self, *files):
+        self.files = files
+
+    def write(self, obj):
+        for f in self.files:
+            f.write(obj)
+            f.flush()
+
+    def flush(self):
+        for f in self.files:
+            f.flush()
 
 def stdout_to_file(file: Path):
     print()

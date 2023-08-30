@@ -1,5 +1,6 @@
 import numpy as np
 import json
+
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import cross_val_score
@@ -10,7 +11,9 @@ from tqdm import tqdm
 from environment import channels_good
 from pandas import DataFrame, read_pickle
 from sklearn.model_selection import (train_test_split)
-from helper_functions import (get_cnt_filename, glimpse_df, serialize_functions,isnull_any)
+from sklearn.feature_selection import SelectKBest, f_classif
+
+from helper_functions import ( glimpse_df, serialize_functions,isnull_any)
 
 class RandomForest:
     def __init__(self):
@@ -23,19 +26,43 @@ class RandomForest:
         # CV ranges
         self.folds = 5
         self.n_trees = [3, 10, 50, 100, 300, 1000]
-        self.max_features = ['auto', 'sqrt', 'log2']
+        self.max_features = [ 'sqrt', 'log2']
         self.max_depths = [10, 30, 50, 100]
         self.criterions = ['gini', 'entropy']
         self.min_samples_splits = [2, 5, 10]
 
     def fit(self):
         # load data
-        df_path = r"C:\Users\Ahmed Guebsi\Downloads\complete-clean-2022-02-26-is_complete_dataset_true___brains_true___reref_false.pickle"
+        #df_path = r"C:\Users\Ahmed Guebsi\Desktop\Data_test\final_modified_df.pkl"
+        df_path = r"C:\Users\Ahmed Guebsi\Desktop\Data_test\hilbert_dataframe.pkl"
         df: DataFrame = read_pickle(df_path)
         glimpse_df(df)
 
-        X = df.drop("is_fatigued", axis=1)
-        y = df.loc[:, "is_fatigued"]
+        # Check for infinity in the DataFrame
+        has_infinity = df.isin([np.inf, -np.inf]).any()
+
+        # Check for values too large for float64 dtype
+        dtype_max_value = np.finfo(np.float64).max
+        has_large_values = df.max() > dtype_max_value
+        print(has_infinity)
+
+        # Get column names with infinity or large values
+        columns_with_infinity = df.columns[has_infinity].tolist()
+        columns_with_large_values = df.columns[has_large_values].tolist()
+
+        # Print column names
+        if columns_with_infinity:
+            print("Columns with infinity:", columns_with_infinity)
+
+        if columns_with_large_values:
+            print("Columns with values too large for dtype('float64'):", columns_with_large_values)
+
+        columns_to_drop = df.columns[df.columns.str.contains('Fp1_LEN|SHAN')]
+        df_test = df.drop(columns=columns_to_drop)
+        df_test = df_test.dropna(axis=1)
+
+        X = df_test.drop("is_adhd", axis=1)
+        y = df_test.loc[:, "is_adhd"]
 
         # Split data into training and testing sets
         X_train, X_test, y_train, y_test = train_test_split(X, y)
@@ -90,3 +117,4 @@ class RandomForest:
 if __name__ =="__main__":
     rfc=RandomForest()
     rfc.fit()
+    importances = rfc.feature_importances

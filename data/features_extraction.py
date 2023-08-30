@@ -9,6 +9,8 @@ FE - Fuzzy entropy - stable results for different parameters. Best noise resista
 """
 from math import ceil, sqrt, log, floor, gamma
 from typing import Dict, List, Optional, Tuple, TypedDict
+from collections import Counter
+from math import log2
 from collections.abc import Iterable
 from scipy import stats, signal, integrate
 import antropy as an
@@ -18,7 +20,7 @@ from scipy.stats import entropy as scipy_entropy
 import numpy as np
 from pandas import DataFrame, Series
 from scipy.signal.spectral import periodogram
-from scipy.stats import gaussian_kde # for kernel density estimation
+from scipy.stats import gaussian_kde # for kernel density estimation, probability density estimation
 from mne.time_frequency import psd_array_welch, psd_array_multitaper
 from environment import FREQ
 import matplotlib.pyplot as plt
@@ -29,78 +31,38 @@ import dit
 #import pyeeg
 from dit.other import tsallis_entropy, renyi_entropy
 from scipy.stats.mstats import gmean
+import numpy.linalg as la
+from numpy import log
+from scipy.special import digamma
+from sklearn.neighbors import BallTree, KDTree
+
+from sklearn.model_selection import train_test_split
+
+
 
 def petrosian_fractal_dimension(x):
-    #return eh.PetrosianFD(x)
     return an.petrosian_fd(x)
+
 def katz_fractal_dimension(x):
-    #return eh.KatzFD(x)
-    return an.katz_fd(x, axis=-1)
+    return an.katz_fd(x)
+
 def higuchi_fractal_dimension(x):
     #return eh.HiguchiFD(x)
     return an.higuchi_fd(x, kmax=10)
 
+def spectral_flatness(x,freq):
+    # Calculate the power spectrum of the EEG signal
+    power_spectrum = np.abs(np.fft.fft(x)) ** 2
 
-def bin_power(X, Band=[0.5, 4, 8, 12, 30], Fs=128):
-    """Compute power in each frequency bin specified by Band from FFT result of
-    X. By default, X is a real signal.
-    """
-    C = np.fft.fft(X)
-    C = abs(C)
-    Power = np.zeros(len(Band) - 1)
-    for Freq_Index in range(0, len(Band) - 1):
-        Freq = float(Band[Freq_Index])
-        Next_Freq = float(Band[Freq_Index + 1])
-        Power[Freq_Index] = sum(
-            C[int(np.floor(Freq / Fs * len(X))):
-                int(np.floor(Next_Freq / Fs * len(X)))]
-        )
-    Power_Ratio = Power / sum(Power)
-    theta_beta_ratio = Power[1] / Power[3]
-    return Power, Power_Ratio, theta_beta_ratio
+    # Calculate the geometric mean and arithmetic mean of the power spectrum
+    geometric_mean = gmean(power_spectrum)
+    arithmetic_mean = np.mean(power_spectrum)
 
+    # Calculate the spectral flatness
+    #spectral_flatness = 10 * np.log10(geometric_mean / arithmetic_mean)
 
-
-
-def conditional_entropy(x):
-    return 0
-def cond_entropy(x):
-    source = dit.Distribution(x[:-1])  # Exclude the last sample for conditioning
-    target = dit.Distribution(x[1:])  # Exclude the first sample for conditioning
-    return dit.shannon.conditional_entropy(target, source)
-
-def calculate_prob_distribution(signal):
-    unique_values, counts = np.unique(signal, return_counts=True)
-    prob_distribution = counts / len(signal)
-    return unique_values, prob_distribution
-
-
-def sure_entropy(x):
-    #unique_values, prob_distribution = calculate_prob_distribution(signal)
-
-    # Calculate SURE entropy using the log, probability, and sum functions
-    #sure_entropy = -np.sum(prob_distribution * np.log2(prob_distribution))
-    threshold = 3 #5
-    unique_values, prob_distribution = calculate_prob_distribution(x)
-    above_threshold = x[x > threshold]
-
-    sure_entropy = np.sum(min(xi ** 2,threshold ** 2 ) for xi in x)
-    print(sure_entropy)
-    #below_threshold_values=[value for value in x if abs(value) < threshold]
-    below_threshold_values = []
-    for index , value in enumerate(x):
-        if abs(value) < threshold:
-            sure_entropy -= index
-            below_threshold_values.append(value)
-    print(below_threshold_values)
-
-    return sure_entropy
-
-def svd_entropy(x):
-    return an.svd_entropy(x, order=3, delay=1, normalize=True)
-def multiscale_entropy(x):
-    return entropy.multiscale_entropy(x, )
-
+    spectral_flatness: np.ndarray=(geometric_mean / arithmetic_mean)
+    return spectral_flatness
 
 ############################################################################################################
 def fuzzy_entropy(x):
@@ -129,401 +91,133 @@ def spectral_entropy(x, freq: float):
 def approximate_entropy(x):
     return an.app_entropy(x, order=2)
 
-############################################################################################################
-
 def approx_entropy(x):
     return eh.ApEn(x, m=2, r=(np.std(x, ddof=0) * 0.2, 1))[0][-1]
 
-def reyni_entropy(x):
-    # Discretize the EEG signal into probability distribution
-    counts, bins = np.histogram(x, bins=np.arange(-200 + 1, 200, 2), density=True)
-    #probabilities = hist / np.sum(hist)
+def psd_welch(x: Series, fs=FREQ):
+    _, psd = signal.welch(x, fs=fs)
+    return psd
 
-    # Create the distribution object
-    #dist = dit.Distribution('custom', outcomes=range(num_bins), probabilities=probabilities)
-    #d = dit.Distribution.from_ndarray(pmf, bins)
-    dist = dit.Distribution([str(bc).zfill(5) for bc in bins[:-1]], counts / sum(counts))
+############################################################################################################
+def sure_entropy(x):
+    #unique_values, prob_distribution = calculate_prob_distribution(signal)
 
-    # Calculate the Renyi entropy
-    #alpha = 2  # Renyi entropy parameter
-    #renyi_entropy = dit.shannon.renyi_entropy(dist, alpha)
-    return renyi_entropy(dist,order=2)
+    # Calculate SURE entropy using the log, probability, and sum functions
+    #sure_entropy = -np.sum(prob_distribution * np.log2(prob_distribution))
+    threshold = 3 #5
+    unique_values, prob_distribution = calculate_prob_distribution(x)
+    above_threshold = x[x > threshold]
 
+    sure_entropy = np.sum(min(xi ** 2,threshold ** 2 ) for xi in x)
+    print(sure_entropy)
+    #below_threshold_values=[value for value in x if abs(value) < threshold]
+    below_threshold_values = []
+    for index , value in enumerate(x):
+        if abs(value) < threshold:
+            sure_entropy += value
+            below_threshold_values.append(value)
 
-def regularized_gaussian_kde(data, bw_method=None, reg_factor=1e-6):
-    # Calculate the covariance matrix of the data
-    #cov_matrix = np.cov(data, rowvar=False)
+    return sure_entropy
 
-    # Regularize the covariance matrix by adding a small factor to its diagonal
-    #cov_matrix_regularized = cov_matrix + reg_factor * np.eye(cov_matrix.shape[0])
+####################################### kraskov entropy implementation using k=3 nearest neighbors ####################################
 
-    # Calculate the regularized Gaussian KDE
-    #kde = gaussian_kde(data, bw_method=bw_method, cov=cov_matrix_regularized)
-
-    # Calculate the variance of the data
-    variance = np.var(data)
-
-    # Regularize the variance by adding a small factor
-    variance_regularized = variance + reg_factor
-
-    # Calculate the regularized Gaussian KDE
-    kde = gaussian_kde(data, bw_method=bw_method)
-    kde.covariance_factor = lambda: variance_regularized
-    kde._compute_covariance()
-
-    return kde
-
-def calculate_renyi_entropy(x, order=2):
-    if order <= 0:
-        raise ValueError("The order should be positive.")
-
-    if len(x) == 0:
-        raise ValueError("The signal is empty.")
-
-        # Create a probability distribution from the signal
-    unique_values, counts = np.unique(x, return_counts=True)
-    probabilities = counts / len(x)
-
-#################################################### prob estimation ##############################"
-    # Convert the data to a NumPy array if it's not already
-    time_series_data = np.array(x)
-
-    # Create a KDE object with the time series data
-    #kde = gaussian_kde(time_series_data)
-    kde =regularized_gaussian_kde(time_series_data)
-
-    # Calculate the probability estimates for individual samples
-    probability_estimates = kde.evaluate(time_series_data)
-
-    # Normalize the probability estimates so that the sum is equal to one
-    normalized_prob_estimates = probability_estimates / np.sum(probability_estimates)
-
-    ren_entropy = np.sum(normalized_prob_estimates ** order)
-    ren_entropy = np.log(ren_entropy) / (1 - order)
-####################################################################################################
-
-    # Calculate the Rényi entropy
-    #ren_entropy = np.sum(probabilities ** order)
-    #ren_entropy = np.log(ren_entropy) / (1 - order)
-    return ren_entropy
-
-def tsalis_entropy(x):
-    counts, bins = np.histogram(x, bins=np.arange(-200 + 1, 200, 2))
-    dist = dit.Distribution([str(bc).zfill(5) for bc in bins[:-1]], counts / sum(counts))
-    return tsallis_entropy(dist, order=2)
+def query_neighbors(tree, x, k):
+    return tree.query(x, k=k + 1)[0][:, k]
 
 
-def calculate_tsallis_entropy(x, q=2):
+def count_neighbors(tree, x, r):
+    return tree.query_radius(x, r, count_only=True)
+
+
+def avgdigamma(points, dvec):
+    # This part finds number of neighbors in some radius in the marginal space
+    # returns expectation value of <psi(nx)>
+    tree = build_tree(points)
+    dvec = dvec - 1e-15
+    num_points = count_neighbors(tree, points, dvec)
+    return np.mean(digamma(num_points))
+
+
+def build_tree(points):
+    if points.shape[1] >= 20:
+        return BallTree(points, metric="chebyshev")
+    return KDTree(points, metric="chebyshev")
+
+
+def krask_entropy(x, k=3, base=2):
+    """The classic K-L k-nearest neighbor continuous entropy estimator
+    x should be a list of vectors, e.g. x = [[1.3], [3.7], [5.1], [2.4]]
+    if x is a one-dimensional scalar and we have four samples
     """
-    Calculate the Tsallis entropy of an EEG signal using natural logarithm (ln) and summation functions.
+    assert k <= len(x) - 1, "Set k smaller than num. samples - 1"
+    x = np.array([x]).T
+    print(x.shape)
+    n_elements, n_features = x.shape
+    #n_elements = len(x)
+    #n_features = 1
+    tree = build_tree(x)
+    nn = query_neighbors(tree, x, k)
+    const = digamma(n_elements) - digamma(k) + n_features * log(2)
+    return (const + n_features * np.log(nn).mean()) / log(base)
 
-    Args:
-        signal (numpy.ndarray): The EEG signal.
-        q (float): The order of the Tsallis entropy.
-
-    Returns:
-        float: The calculated Tsallis entropy.
-
-    Raises:
-        ValueError: If q is less than or equal to 0 or the signal is empty.
-    """
-    if q <= 0:
-        raise ValueError("q should be greater than 0.")
-
-    if len(x) == 0:
-        raise ValueError("The signal is empty.")
-
-    # Create a probability distribution from the signal
-    unique_values, counts = np.unique(x, return_counts=True)
-    probabilities = counts / len(x)
-
-    #################################################### prob estimation ##############################"
-    # Convert the data to a NumPy array if it's not already
-    time_series_data = np.array(x)
-
-    # Create a KDE object with the time series data
-    kde = gaussian_kde(time_series_data)
-
-    # Calculate the probability estimates for individual samples
-    probability_estimates = kde.evaluate(time_series_data)
-
-    # Normalize the probability estimates so that the sum is equal to one
-    normalized_prob_estimates = probability_estimates / np.sum(probability_estimates)
-
-    tsallis_entropy = (1 - np.sum(normalized_prob_estimates ** q)) / (q - 1)
-
-    ######################################################################################################
-    # Calculate the Tsallis entropy , resulted in negative tsallis entropy
-    #tsallis_entropy = np.log(probabilities ** q)
-    #tsallis_entropy = np.sum(probabilities * tsallis_entropy) / (q - 1)
-
-    # Calculate the Tsallis entropy , worked correctly
-    #tsallis_entropy = (1 - np.sum(probabilities ** q)) / (q - 1)
-    return tsallis_entropy
-
-
-def calculate_log_energy_entropy(x):
-    """
-    Calculate the Log Energy Entropy (LEEn) of an EEG signal using logarithm and summation functions.
-
-    Args:
-        signal (numpy.ndarray): The EEG signal.
-
-    Returns:
-        float: The calculated Log Energy Entropy.
-
-    Raises:
-        ValueError: If the signal is empty.
-    """
-    if len(x) == 0:
-        raise ValueError("The signal is empty.")
-
-    # Create a probability distribution from the signal
-    unique_values, counts = np.unique(x, return_counts=True)
-    probabilities = counts / len(x)
-
-    # Calculate the power spectrum of the signal
-    power_spectrum = np.abs(np.fft.fft(x)) ** 2
-
-    # Normalize the power spectrum
-    normalized_power_spectrum = power_spectrum / np.sum(power_spectrum)
-
-    #################################################### prob estimation ##############################"
-    # Convert the data to a NumPy array if it's not already
-    time_series_data = np.array(x)
-
-    # Create a KDE object with the time series data
-    kde = gaussian_kde(time_series_data)
-
-    # Calculate the probability estimates for individual samples
-    probability_estimates = kde.evaluate(time_series_data)
-
-    # Normalize the probability estimates so that the sum is equal to one
-    normalized_prob_estimates = probability_estimates / np.sum(probability_estimates)
-    #print("log",np.log2(normalized_prob_estimates))
-
-    log_energy_entropy = -np.sum((np.log2(normalized_prob_estimates)) ** 2)
-    ######################################################################################################
-    # Calculate the log energy entropy
-    #log_energy_entropy = -np.sum(normalized_power_spectrum * np.log2(normalized_power_spectrum))
-    #log_energy_entropy = -np.sum((np.log(probabilities))**2) worked correctly
-
-    return log_energy_entropy
-
-def calculate_shannon_entropy(x):
-    """
-    Calculate the Shannon entropy of an EEG signal using logarithm, probability, and summation functions.
-
-    Args:
-        signal (numpy.ndarray): The EEG signal.
-
-    Returns:
-        float: The calculated Shannon entropy.
-
-    Raises:
-        ValueError: If the signal is empty.
-    """
-    if len(x) == 0:
-        raise ValueError("The signal is empty.")
-
-    # Create a probability distribution from the signal
-    unique_values, counts = np.unique(x, return_counts=True)
-    probabilities = counts / len(x)
-
-    #################################################### prob estimation ##############################"
-    # Convert the data to a NumPy array if it's not already
-    time_series_data = np.array(x)
-
-    # Create a KDE object with the time series data
-    kde = gaussian_kde(time_series_data)
-
-    # Calculate the probability estimates for individual samples
-    probability_estimates = kde.evaluate(time_series_data)
-
-    # Normalize the probability estimates so that the sum is equal to one
-    normalized_prob_estimates = probability_estimates / np.sum(probability_estimates)
-
-    shannon_entropy = -np.sum(normalized_prob_estimates * np.log2(normalized_prob_estimates))
-    ######################################################################################################
-    # Calculate the Shannon entropy
-    #shannon_entropy = -np.sum(probabilities * np.log2(probabilities))
-
-    return shannon_entropy
-
+####################################################################################################################################
 def kraskov_entropy(x):
     return eh.K2En(x, m=2, tau=1, r=0.2)[0][0]
-def permutation_entropy(x):
-    return eh.PermEn(x)[0][-1]
+
+####################################################################################################################################
+
 def cor_cond_entropy(x):
     return eh.CondEn(x, tau=1, c=6, Logx=np.exp(1), Norm=False)[0][-1]
+####################################################################################################################################
+def permutation_entropy(x):
+    return eh.PermEn(x)[0][-1]
 def permutation_entroy(x):
     return eh.PermEn(x)
 def permut_entropy(x):
     return an.perm_entropy(x, order=3, normalize=True)
 
-def log_entropy(x):
-    return scipy_entropy(x, base=2)
-def log2_entropy(x):
-    # Calculate Shannon entropy
-    shannon_entropy = entropy.shannon_entropy(x)
+def cal_permutation_entropy(data):
+    return entropy.permutation_entropy(data, order=3, normalize=True)
 
-    # Calculate Log entropy
-    log_entropy = -np.log2(shannon_entropy)
-    return log_entropy
+#######################################################################################################################################
+def svd_entropy(x):
+    return an.svd_entropy(x, order=3, delay=1, normalize=True)
+def multiscale_entropy(x):
+    return entropy.multiscale_entropy(x, )
+#####################################################################################################################################
+def largest_lyapunov_exponent(x):
+    n= 2 # embedding dimension
+    tau = 0  # time delay / embedding lag
+    fs =128
+    T = np.mean(x)  # mean of the signal
+    return pyeeg.LLE(x, n, tau, fs, T)
+def information_based_similarity(x,y,n):
 
-def shannon_entropy(x):
-    return entropy.shannon_entropy(x)
+    # return pyeeg.IBS(x,y,n)
+    return pyeeg.information_based_similarity(x,y,n)
 
-def wiener_entropy(x): #Spectral flatness (Wiener entropy)
-    return 0
-def spectral_flatness(x,freq):
-    # Calculate the power spectrum of the EEG signal
-    power_spectrum = np.abs(np.fft.fft(x)) ** 2
+########## EEGExract ########################################
+# Lyapunov exponent
+def lyapunov(eegData):
+    return np.mean(np.log(np.abs(np.gradient(eegData,axis=0))),axis=0)
 
-    # Calculate the geometric mean and arithmetic mean of the power spectrum
-    geometric_mean = gmean(power_spectrum)
-    arithmetic_mean = np.mean(power_spectrum)
-
-    # Calculate the spectral flatness
-    #spectral_flatness = 10 * np.log10(geometric_mean / arithmetic_mean)
-
-    spectral_flatness: np.ndarray=(geometric_mean / arithmetic_mean)
-    return spectral_flatness
-
-def psd_welch(x: Series, fs=FREQ):
-    _, psd = signal.welch(x, fs=fs)
-    return psd
-##########
-# Hjorth Mobility
-# Hjorth Complexity
-# variance = mean(signal^2) iff mean(signal)=0
-# which it is be because I normalized the signal
-# Assuming signals have mean 0
-# Mobility = sqrt( mean(dx^2) / mean(x^2) )
-def hjorthParameters(xV):
-    dxV = np.diff(xV, axis=1)
-    ddxV = np.diff(dxV, axis=1)
-
-    mx2 = np.mean(np.square(xV), axis=1)
-    mdx2 = np.mean(np.square(dxV), axis=1)
-    mddx2 = np.mean(np.square(ddxV), axis=1)
-
-    mob = mdx2 / mx2
-    complexity = np.sqrt((mddx2 / mdx2) / mob)
-    mobility = np.sqrt(mob)
-
-    # PLEASE NOTE that Mohammad did NOT ACTUALLY use hjorth complexity,
-    # in the matlab code for hjorth complexity subtraction by mob not division was used
-    return mobility, complexity
-
-
-
-def compute_mean(data):
-    """Mean of the data (per channel).
-    Parameters
-    ----------
-    data : ndarray, shape (n_channels, n_times)
-    Returns
-    -------
-    output : ndarray, shape (n_channels,)
-    Notes
-    -----
-    Alias of the feature function: **mean**
+def bin_power(X, Band=[0.5, 4, 8, 12, 30], Fs=128):
+    """Compute power in each frequency bin specified by Band from FFT result of
+    X. By default, X is a real signal.
     """
-    return np.mean(data, axis=-1)
-
-
-def compute_variance(data):
-    """Variance of the data (per channel).
-    Parameters
-    ----------
-    data : shape (n_channels, n_times)
-    Returns
-    -------
-    output : ndarray, shape (n_channels,)
-    Notes
-    -----
-    Alias of the feature function: **variance**
-    """
-    return np.var(data, axis=-1, ddof=1)
-
-
-def compute_std(data):
-    """Standard deviation of the data.
-    Parameters
-    ----------
-    data : shape (n_channels, n_times)
-    Returns
-    -------
-    output : ndarray, shape (n_channels)
-    Notes
-    -----
-    Alias of the feature function: **std**
-    """
-    return np.std(data, axis=-1, ddof=1)
-
-def compute_rms(data):
-    """Root-mean squared value of the data (per channel).
-    Parameters
-    ----------
-    data : ndarray, shape (n_channels, n_times)
-    Returns
-    -------
-    output : ndarray, shape (n_channels,)
-    Notes
-    -----
-    Alias of the feature function: *rms*
-    """
-    return np.sqrt(np.mean(np.power(data, 2), axis=-1))
-
-def compute_skewness(data):
-    """Skewness of the data (per channel).
-    Parameters
-    ----------
-    data : ndarray, shape (n_channels, n_times)
-    Returns
-    -------
-    output : ndarray, shape (n_channels,)
-    Notes
-    -----
-    Alias of the feature function: **skewness**
-    """
-    ndim = data.ndim
-    return stats.skew(data, axis=ndim - 1)
-
-
-def compute_kurtosis(data):
-    """Kurtosis of the data (per channel).
-    Parameters
-    ----------
-    data : ndarray, shape (n_channels, n_times)
-    Returns
-    -------
-    output : ndarray, shape (n_channels,)
-    Notes
-    -----
-    Alias of the feature function: **kurtosis**
-    """
-    ndim = data.ndim
-    return stats.kurtosis(data, axis=ndim - 1, fisher=False)
-
-def compute_quantile(data, q=0.75):
-    """Quantile of the data (per channel).
-    Parameters
-    ----------
-    data : ndarray, shape (n_channels, n_times)
-    q : float or list
-        Quantile or sequence of quantiles to compute, which must be between 0
-        and 1 inclusive.
-    Returns
-    -------
-    output : ndarray, shape (n_channels * len(q),)
-    Notes
-    -----
-    Alias of the feature function: *quantile*
-    """
-    return np.ravel(np.quantile(data, q, axis=-1), order='F')
-
+    C = np.fft.fft(X)
+    C = abs(C)
+    Power = np.zeros(len(Band) - 1)
+    for Freq_Index in range(0, len(Band) - 1):
+        Freq = float(Band[Freq_Index])
+        Next_Freq = float(Band[Freq_Index + 1])
+        Power[Freq_Index] = sum(
+            C[int(np.floor(Freq / Fs * len(X))):
+                int(np.floor(Next_Freq / Fs * len(X)))]
+        )
+    Power_Ratio = Power / sum(Power)
+    theta_beta_ratio = Power[1] / Power[3]
+    return Power, Power_Ratio, theta_beta_ratio
 ##########
 # Filter the eegData, midpass filter
 #	eegData: 3D np array [chans x ms x epochs]
@@ -801,6 +495,406 @@ def compute_hjorth_complexity(data):
     m_x = compute_hjorth_mobility(data)
     complexity = np.divide(m_dx, m_x)
     return complexity
+
+############################################################################################################################
+#############################################################################################################################
+#############################################################################################################################
+
+def conditional_entropy(time_series):
+    # Discretize the time series into bins
+    num_bins = 5
+    discretized_series = np.digitize(time_series, np.linspace(0, 10, num_bins + 1))
+
+    # Calculate conditional probability distribution
+    conditional_prob_dist = {}
+    for i in range(1, len(discretized_series)):
+        previous_value = discretized_series[i - 1]
+        current_value = discretized_series[i]
+        if previous_value not in conditional_prob_dist:
+            conditional_prob_dist[previous_value] = Counter()
+        conditional_prob_dist[previous_value][current_value] += 1
+
+    # Calculate conditional entropy
+    conditional_entropy = 0
+    total_transitions = len(discretized_series) - 1
+    for prev_value, transition_counts in conditional_prob_dist.items():
+        for next_value, count in transition_counts.items():
+            prob_transition = count / total_transitions
+            prob_prev = (discretized_series == prev_value).sum() / len(discretized_series)
+            conditional_entropy -= prob_transition * log2(prob_transition / prob_prev)
+
+    print("Conditional Entropy:", conditional_entropy)
+    return conditional_entropy
+
+def cal_conditional_entropy(data):
+    # Calculate joint and marginal probabilities
+    hist_joint, _ = np.histogram2d(data[:-1], data[1:], bins='auto', density=True)
+    hist_marginal, _ = np.histogram(data[1:], bins='auto', density=True)
+
+    # Convert histograms to probabilities
+    p_joint = hist_joint / np.sum(hist_joint)
+    p_marginal = hist_marginal / np.sum(hist_marginal)
+
+    # Calculate conditional entropy
+    conditional_entropy = -np.sum(p_joint * np.log2(p_joint / p_marginal))
+    return conditional_entropy
+
+
+def cond_entropy(x):
+    source = dit.Distribution(x[:-1])  # Exclude the last sample for conditioning
+    target = dit.Distribution(x[1:])  # Exclude the first sample for conditioning
+    return dit.shannon.conditional_entropy(target, source)
+
+def calculate_prob_distribution(signal):
+    unique_values, counts = np.unique(signal, return_counts=True)
+    prob_distribution = counts / len(signal)
+    return unique_values, prob_distribution
+
+def outcome_probabalities(x):
+    outcome_probabalities={}
+    time_series_data = np.array(x)
+    # time_series_data=x
+    print(time_series_data.shape)
+    # Create a KDE object with the time series data
+    kde = gaussian_kde(time_series_data)
+    # kde =regularized_gaussian_kde(time_series_data)
+
+    # Calculate the probability estimates for individual samples
+    probability_estimates = kde.evaluate(time_series_data)
+
+    # Normalize the probability estimates so that the sum is equal to one
+    normalized_prob_estimates = probability_estimates / np.sum(probability_estimates)
+    for index, value in enumerate(time_series_data):
+        outcome_probabalities[str(value)] = normalized_prob_estimates[index]
+
+    return outcome_probabalities , normalized_prob_estimates
+
+def reyni_entropy(x):
+    # Discretize the EEG signal into probability distribution
+    counts, bins = np.histogram(x, bins=np.arange(-200 + 1, 200, 2), density=True)
+    #probabilities = hist / np.sum(hist)
+
+    # Create the distribution object
+    #dist = dit.Distribution('custom', outcomes=range(num_bins), probabilities=probabilities)
+    #d = dit.Distribution.from_ndarray(pmf, bins)
+    #dist = dit.Distribution([str(bc).zfill(5) for bc in bins[:-1]], counts / sum(counts))
+
+    out_prob, norm_prob = outcome_probabalities(x)
+    print(out_prob.__len__())
+    print(out_prob)
+    time_series_data = np.array(x)
+
+    outcomes_probs = {'000': 1 / 4, '011': 1 / 4, '101': 1 / 4, '110': 1 / 4}
+    for k, v  in out_prob.items():
+        print(k.__len__())
+    dist = dit.Distribution(outcomes_probs)
+    #dist = dit.Distribution(time_series_data,norm_prob)
+
+    # Calculate the Renyi entropy
+    #alpha = 2  # Renyi entropy parameter
+    #renyi_entropy = dit.shannon.renyi_entropy(dist, alpha)
+    return renyi_entropy(dist,order=2)
+
+
+def regularized_gaussian_kde(data, bw_method=None, reg_factor=1e-6):
+    # Calculate the covariance matrix of the data (depends on data structure and shape of data array)
+    #cov_matrix = np.cov(data, rowvar=False)
+
+    # Regularize the covariance matrix by adding a small factor to its diagonal
+    #cov_matrix_regularized = cov_matrix + reg_factor * np.eye(cov_matrix.shape[0])
+
+    # Calculate the regularized Gaussian KDE
+    #kde = gaussian_kde(data, bw_method=bw_method, cov=cov_matrix_regularized)
+
+    # Calculate the variance of the data
+    variance = np.var(data)
+    print(type(data))
+
+    # Regularize the variance by adding a small factor
+    variance_regularized = variance + reg_factor
+
+    # Calculate the regularized Gaussian KDE
+    kde = gaussian_kde(data)
+    print(kde)
+    kde.covariance_factor = lambda: variance_regularized
+    kde._compute_covariance()
+
+    return kde
+
+def calculate_renyi_entropy(x, order=2):
+    if order <= 0:
+        raise ValueError("The order should be positive.")
+
+    if len(x) == 0:
+        raise ValueError("The signal is empty.")
+
+    #print("cheeeeeeeeeeck", x.to_numpy().shape)
+
+        # Create a probability distribution from the signal
+    unique_values, counts = np.unique(x, return_counts=True)
+    print("unique_values",unique_values.shape)
+    probabilities = counts / len(x)
+
+#################################################### prob estimation ##############################"
+    # Convert the data to a NumPy array if it's not already
+    time_series_data = np.array(x)
+    #time_series_data=x
+    print(time_series_data.shape)
+    # Create a KDE object with the time series data
+    kde = gaussian_kde(time_series_data)
+    #kde =regularized_gaussian_kde(time_series_data)
+
+    # Calculate the probability estimates for individual samples
+    probability_estimates = kde.evaluate(time_series_data)
+    print("sum prob",sum(probability_estimates))
+
+    # Normalize the probability estimates so that the sum is equal to one
+    normalized_prob_estimates = probability_estimates / np.sum(probability_estimates)
+
+    ren_entropy = np.sum(normalized_prob_estimates ** order)
+    ren_entropy = np.log(ren_entropy) / (1 - order)
+
+    entropy_equation = [(p ** order) for p in normalized_prob_estimates]
+    entropy = (1 / (1 - order) * log(sum(entropy_equation)))
+####################################################################################################
+
+    # Calculate the Rényi entropy
+    #ren_entropy = np.sum(probabilities ** order)
+    #ren_entropy = np.log(ren_entropy) / (1 - order)
+    return entropy
+
+def cal_renyi_entropy(data, order=2):
+    prob = np.histogram(data, bins='auto', density=True)[0]
+    renyi_entropy = (1 / (1 - order)) * np.log2(np.sum(prob ** order))
+    return renyi_entropy
+def tsalis_entropy(x):
+    counts, bins = np.histogram(x, bins=np.arange(-200 + 1, 200, 2))
+    dist = dit.Distribution([str(bc).zfill(5) for bc in bins[:-1]], counts / sum(counts))
+    return tsallis_entropy(dist, order=2)
+
+
+def calculate_tsallis_entropy(x, q=2):
+    """
+    Calculate the Tsallis entropy of an EEG signal using natural logarithm (ln) and summation functions.
+
+    Args:
+        signal (numpy.ndarray): The EEG signal.
+        q (float): The order of the Tsallis entropy.
+
+    Returns:
+        float: The calculated Tsallis entropy.
+
+    Raises:
+        ValueError: If q is less than or equal to 0 or the signal is empty.
+    """
+    if q <= 0:
+        raise ValueError("q should be greater than 0.")
+
+    if len(x) == 0:
+        raise ValueError("The signal is empty.")
+
+    # Create a probability distribution from the signal
+    unique_values, counts = np.unique(x, return_counts=True)
+    probabilities = counts / len(x)
+
+    #################################################### prob estimation ##############################"
+    # Convert the data to a NumPy array if it's not already
+    time_series_data = np.array(x)
+
+    # Create a KDE object with the time series data
+    kde = gaussian_kde(time_series_data)
+
+    # Calculate the probability estimates for individual samples
+    probability_estimates = kde.evaluate(time_series_data)
+
+    # Normalize the probability estimates so that the sum is equal to one
+    normalized_prob_estimates = probability_estimates / np.sum(probability_estimates)
+
+    tsallis_entropy = (1 - np.sum(normalized_prob_estimates ** q)) / (q - 1)
+
+    entropy_equation = [(p ** q) for p in normalized_prob_estimates]
+    entropy = (1 / (q - 1)) * (1 - sum(entropy_equation))
+
+    ######################################################################################################
+    # Calculate the Tsallis entropy , resulted in negative tsallis entropy
+    #tsallis_entropy = np.log(probabilities ** q)
+    #tsallis_entropy = np.sum(probabilities * tsallis_entropy) / (q - 1)
+
+    # Calculate the Tsallis entropy , worked correctly
+    #tsallis_entropy = (1 - np.sum(probabilities ** q)) / (q - 1)
+    return entropy
+
+def cal_tsallis_entropy(data, q=2):
+    prob = np.histogram(data, bins='auto', density=True)[0]
+    entropy_equation = [(p ** q) for p in prob]
+    tsallis_entropy = (1 / (q - 1)) * (1 -sum(entropy_equation))
+    return tsallis_entropy
+
+# Extract the tsalis Entropy
+def tsalisEntropy(eegData, bin_min, bin_max, binWidth, orders = [2]):
+
+    #eegData: 3D np array [chans x ms x epochs] of EEG data
+
+    H = [np.zeros((eegData.shape[0], eegData.shape[2]))]*len(orders)
+    for chan in range(H[0].shape[0]):
+        for epoch in range(H[0].shape[1]):
+            counts, bins = np.histogram(eegData[chan,:,epoch], bins="auto")
+            dist = dit.Distribution([str(bc).zfill(5) for bc in bins[:-1]],counts/sum(counts))
+            for ii,order in enumerate(orders):
+                H[ii][chan,epoch] = tsallis_entropy(dist,order)
+    return H
+############################################################################################################################
+#############################################################################################################################
+
+def calculate_log_energy_entropy(x):
+    """
+    Calculate the Log Energy Entropy (LEEn) of an EEG signal using logarithm and summation functions.
+
+    Args:
+        signal (numpy.ndarray): The EEG signal.
+
+    Returns:
+        float: The calculated Log Energy Entropy.
+
+    Raises:
+        ValueError: If the signal is empty.
+    """
+    if len(x) == 0:
+        raise ValueError("The signal is empty.")
+
+    # Create a probability distribution from the signal
+    unique_values, counts = np.unique(x, return_counts=True)
+    probabilities = counts / len(x)
+
+    # Calculate the power spectrum of the signal
+    power_spectrum = np.abs(np.fft.fft(x)) ** 2
+
+    # Normalize the power spectrum
+    normalized_power_spectrum = power_spectrum / np.sum(power_spectrum)
+
+    #################################################### prob estimation ##############################"
+    # Convert the data to a NumPy array if it's not already
+    time_series_data = np.array(x)
+
+    # Create a KDE object with the time series data
+    kde = gaussian_kde(time_series_data)
+
+    # Calculate the probability estimates for individual samples
+    probability_estimates = kde.evaluate(time_series_data)
+
+    # Normalize the probability estimates so that the sum is equal to one
+    normalized_prob_estimates = probability_estimates / np.sum(probability_estimates)
+    #print("log",np.log2(normalized_prob_estimates))
+
+    log_energy_entropy = -np.sum((np.log2(normalized_prob_estimates)) ** 2)
+    ######################################################################################################
+    # Calculate the log energy entropy
+    #log_energy_entropy = -np.sum(normalized_power_spectrum * np.log2(normalized_power_spectrum))
+    #log_energy_entropy = -np.sum((np.log(probabilities))**2) #worked correctly
+
+    return log_energy_entropy
+
+def cal_log_energy_entropy(data):
+    prob = np.histogram(data, bins='auto', density=True)[0]
+    log_energy_entropy = -np.sum((np.log2(prob)) ** 2)
+    return log_energy_entropy
+#######################################################################################################################
+
+def calculate_shannon_entropy(x):
+    """
+    Calculate the Shannon entropy of an EEG signal using logarithm, probability, and summation functions.
+
+    Args:
+        signal (numpy.ndarray): The EEG signal.
+
+    Returns:
+        float: The calculated Shannon entropy.
+
+    Raises:
+        ValueError: If the signal is empty.
+    """
+    if len(x) == 0:
+        raise ValueError("The signal is empty.")
+
+    # Create a probability distribution from the signal
+    unique_values, counts = np.unique(x, return_counts=True)
+    probabilities = counts / len(x)
+
+    #################################################### prob estimation ##############################"
+    # Convert the data to a NumPy array if it's not already
+    time_series_data = np.array(x)
+
+    # Create a KDE object with the time series data
+    kde = gaussian_kde(time_series_data)
+
+    # Calculate the probability estimates for individual samples
+    probability_estimates = kde.evaluate(time_series_data)
+
+    # Normalize the probability estimates so that the sum is equal to one
+    normalized_prob_estimates = probability_estimates / np.sum(probability_estimates)
+
+    shannon_entropy = -np.sum(normalized_prob_estimates * np.log2(normalized_prob_estimates))
+    ######################################################################################################
+    # Calculate the Shannon entropy
+    #shannon_entropy = -np.sum(probabilities * np.log2(probabilities))
+
+    return shannon_entropy
+def cal_shannon_entropy(data):
+    prob = np.histogram(data, bins='auto', density=True)[0]
+    entropy_equation = [(p * np.log(p)) for p in prob]
+    shannon_entropy = -np.sum(entropy_equation)
+    return shannon_entropy
+
+
+def log_entropy(x):
+    return scipy_entropy(x, base=2)
+def log2_entropy(x):
+    # Calculate Shannon entropy
+    shannon_entropy = entropy.shannon_entropy(x)
+
+    # Calculate Log entropy
+    log_entropy = -np.log2(shannon_entropy)
+    return log_entropy
+def shannon_entropy(x):
+    return entropy.shannon_entropy(x)
+
+
+def shannonEntropy(eegData, bin_min, bin_max, binWidth):
+    H = np.zeros((eegData.shape[0], eegData.shape[2]))
+    for chan in range(H.shape[0]):
+        for epoch in range(H.shape[1]):
+            counts, binCenters = np.histogram(eegData[chan,:,epoch], bins=np.arange(bin_min+1, bin_max, binWidth))
+            nz = counts > 0
+            prob = counts[nz] / np.sum(counts[nz])
+            H[chan, epoch] = -np.dot(prob, np.log2(prob/binWidth))
+    return H
+
+
+##########
+# Hjorth Mobility
+# Hjorth Complexity
+# variance = mean(signal^2) iff mean(signal)=0
+# which it is be because I normalized the signal
+# Assuming signals have mean 0
+# Mobility = sqrt( mean(dx^2) / mean(x^2) )
+def hjorthParameters(xV):
+    dxV = np.diff(xV, axis=0)
+    ddxV = np.diff(dxV, axis=0)
+
+    mx2 = np.mean(np.square(xV), axis=0)
+    mdx2 = np.mean(np.square(dxV), axis=0)
+    mddx2 = np.mean(np.square(ddxV), axis=0)
+
+    mob = mdx2 / mx2
+    complexity = np.sqrt((mddx2 / mdx2) / mob)
+    mobility = np.sqrt(mob)
+
+    # PLEASE NOTE that Mohammad did NOT ACTUALLY use hjorth complexity,
+    # in the matlab code for hjorth complexity subtraction by mob not division was used
+    return mobility, complexity
+
+
+
 ################################################### Pyrem #####################################################################
 
 def hjorth(a):
@@ -1045,25 +1139,6 @@ def hjorth_params(x, axis=-1):
     com = np.sqrt(ddx_var / dx_var) / mob
     return mob, com
 
-def largest_lyapunov_exponent(x):
-    n= 2 # embedding dimension
-    tau = 0  # time delay / embedding lag
-    fs =128
-    T = np.mean(x)  # mean of the signal
-    return pyeeg.LLE(x, n, tau, fs, T)
-def information_based_similarity(x,y,n):
-
-    # return pyeeg.IBS(x,y,n)
-    return pyeeg.information_based_similarity(x,y,n)
-
-########## EEGExract ########################################
-# Lyapunov exponent
-def lyapunov(eegData):
-    return np.mean(np.log(np.abs(np.gradient(eegData,axis=1))),axis=1)
-
-
-
-
 ##########################################################" pyrem ###############################################################
 
 def hurst_x(signal):
@@ -1250,25 +1325,8 @@ class FeatureExtractor:
 
     def _set_mappers(self):
         self._name_to_function_mapper = {
-            # 4 features used in the paper
 
-
-
-
-            #"CEN":self.feature_cond_entropy,
-            "SUE": self.feature_sure_entropy,
-
-            "delta": self.feature_delta_power,
-            "theta": self.feature_theta_power,
-            "alpha": self.feature_alpha_power,
-            "beta": self.feature_beta_power,
-            "alpha_ratio": self.feature_alpha_power_ratio,
-            "beta_ratio": self.feature_beta_power_ratio,
-            "delta_ratio": self.feature_delta_power_ratio,
-            "theta_ratio": self.feature_theta_power_ratio,
-            "theta_beta_ratio": self.feature_theta_beta_power_ratio,
-
-
+            "KE":self.feature_krask_entropy,
 
         }
         self._feature_function_to_mapper_mapper = {v: k for k, v in self._name_to_function_mapper.items()}
@@ -1281,9 +1339,204 @@ class FeatureExtractor:
         self.signal = signal
         self.freq = freq
 
+    def feature_standard_deviation(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.std(x), axis=0)
+
+    def feature_mean(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.mean(x), axis=0)
+
+    def feature_var(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.var(x), axis=0)
+
+    def feature_cov(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.std(x) / np.mean(x), axis=0)
+
+    def feature_max(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.max(x), axis=0)
+
+    def feature_min(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.min(x), axis=0)
+
+    def feature_median(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.median(x), axis=0)
+
+    def feature_range(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.max(x) - np.min(x), axis=0)
+
+    def feature_peak(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.max(np.abs(x)), axis=0)
+
+    def feature_peak_to_peak(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.max(x) - np.min(x), axis=0)
+
+    def feature_q1(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.quantile(x, 0.25), axis=0)
+
+    def feature_q2(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.quantile(x, 0.5), axis=0)
+
+    def feature_q3(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.quantile(x, 0.75), axis=0)
+
+    def feature_iqr(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.quantile(x, 0.75) - np.quantile(x, 0.25), axis=0)
+
+    def feature_mean_deviation_max(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.mean(np.abs(x - np.mean(x))) / np.max(x), axis=0)
+
+    def feature_mean_deviation_min(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.mean(np.abs(x - np.mean(x))) / np.min(x), axis=0)
+
+    def feature_mean_deviation_range(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.mean(np.abs(x - np.mean(x))) / (np.max(x) - np.min(x)), axis=0)
+
+    def feature_mean_deviation_covariance(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.mean(np.abs(x - np.mean(x))) / np.std(x), axis=0)
+
+    def feature_mom2(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.mean(x ** 2), axis=0)
+
+    def feature_mom3(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.mean(x ** 3), axis=0)
+
+    def feature_mav(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.mean(np.abs(x)), axis=0)
+
+    def feature_mav1(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.mean(np.abs(np.diff(x))), axis=0)
+
+    def feature_mav2(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.mean(np.abs(np.diff(x, 2))), axis=0)
+
+    def feature_mav3(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.mean(np.abs(np.diff(x, 3))), axis=0)
+
+    def feature_integrated_eeg(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.sum(np.abs(x)), axis=0)
+
+    def feature_spectral_flatness(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: spectral_flatness(x.to_numpy(), self.freq), axis=0)
+
+    def feature_skewness(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: skew(x), axis=0)
+
+    def feature_kurtosis(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: kurtosis(x), axis=0)
+
+    def feature_waveform_length(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.sum(np.abs(np.diff(x))), axis=0)
+
+    def feature_aac(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.sum(np.abs(x)), axis=0)
+
+    def feature_rms(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.sqrt(np.mean(x ** 2)), axis=0)
+
+    def feature_zc(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.sum(np.diff(np.sign(x))), axis=0)
+
+    def feature_zero_crossing(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.sum(np.diff(np.sign(x)) != 0), axis=0)
+
+    def feature_ssc(self, df: DataFrame, **kwargs):  # Slope sign change
+        return df.apply(func=lambda x: np.sum(np.diff(x) * np.sign(np.diff(x))), axis=0)
+
+    def feature_ssi(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.sum(x ** 2), axis=0)
+
+    def feature_clearance_factor(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.max(x) / np.sqrt(np.mean(x ** 2)), axis=0)
+
+    def feature_clearance(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: np.sqrt(np.mean(x ** 2)), axis=0)
+
+    def feature_willison_amplitude(self, df: DataFrame, **kwargs):  # Willison amplitude
+        return df.apply(func=lambda x: np.sum(np.abs(np.diff(x)) > self.willison_amplitude_threshold), axis=0)
+
+    def feature_dasdv(self, df: DataFrame, **kwargs):  # Difference absolute standard deviation value
+        return df.apply(func=lambda x: np.sqrt(np.mean(np.square(np.diff(x)))), axis=0)
+
+    def feature_power_spectral_density(self, df: DataFrame, freq_filter_range: Optional[Tuple[float, float]],
+                                       epoch_id: int, **kwargs):
+        pdfs = df.apply(func=lambda x: psd_welch(x, self.freq), axis=0)
+        low_freq, high_freq = freq_filter_range
+        pdfs = pdfs[floor(low_freq): ceil(high_freq)]
+        return pdfs.mean(axis=0)
+
+    def feature_spectral_entropy(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: spectral_entropy(x.to_numpy(), self.freq), axis=0)
+
+    def feature_approximate_entropy(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: approximate_entropy(x.to_numpy()), axis=0)
+
+    def feature_sample_entropy(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: sample_entropy(x.to_numpy()), axis=0)
+
+    def feature_fuzzy_entropy(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: fuzzy_entropy(x.to_numpy()), axis=0)
+
+    def feature_renyi_entropy(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: cal_renyi_entropy(x.to_numpy()), axis=0)
+
+    def feature_tsallis_entropy(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: cal_tsallis_entropy(x.to_numpy()), axis=0)
+
+    def feature_shannon_entropy(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: log_entropy(x.to_numpy()), axis=0)
+
+    def feature_log_energy(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: log2_entropy(x.to_numpy()), axis=0)
+
+    def feature_kolmogorov_entropy(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: kolmogorov_entropy(x.to_numpy()), axis=0)
+    def feature_krask_entropy(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: krask_entropy(x.to_numpy()), axis=0)
+
+    def feature_permutation_entropy(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: cal_permutation_entropy(x.to_numpy()), axis=0)
+
+    def feature_cor_cond_entropy(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: cor_cond_entropy(x.to_numpy()), axis=0)
+
+    def feature_kraskov_entropy(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: kraskov_entropy(x.to_numpy()), axis=0)
+
+    def feature_conditional_entropy(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: conditional_entropy(x), axis=0)
 
     def feature_sure_entropy(self, df: DataFrame, **kwargs):
         return df.apply(func=lambda x: sure_entropy(x.to_numpy()), axis=0)
+
+    def feature_hjorth_morbidity(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: hjorth(x.to_numpy())[1], axis=0)
+
+    def feature_hjorth_complexity(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: hjorth(x.to_numpy())[2], axis=0)
+
+    def feature_hjorth_activity(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: hjorth(x.to_numpy())[0], axis=0)
+
+    def feature_hjorth_mobility(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: hjorth(x.to_numpy())[1] / hjorth(x.to_numpy())[0], axis=0)
+
+    def feature_higuchi_fractal_dimension(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: higuchi_fractal_dimension(x.to_numpy()), axis=0)
+
+    def feature_hurst_exponent(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: hurst(x.to_numpy()), axis=0)
+
+
+    def feature_petrosian_fractal_dimension(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: petrosian_fractal_dimension(x.to_numpy()), axis=0)
+
+    def feature_katz_fractal_dimension(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: katz_fractal_dimension(x.to_numpy()), axis=0)
+
+
+    def feature_lyapunov_exponent(self, df: DataFrame, **kwargs):
+        return df.apply(func=lambda x: lyapunov(x.to_numpy()), axis=0)
+
+
     def feature_delta_power(self, df: DataFrame, **kwargs):
         return df.apply(func=lambda x: bin_power(x.to_numpy())[0][0], axis=0)
     def feature_theta_power(self, df: DataFrame, **kwargs):
@@ -1305,7 +1558,6 @@ class FeatureExtractor:
     def feature_theta_beta_power_ratio(self, df: DataFrame, **kwargs):
         return df.apply(func=lambda x: bin_power(x.to_numpy())[2], axis=0)
 
-
     def get_features(self, df: DataFrame, **kwargs: FeatureContext) -> Dict:
         features = {}
         for feature_function in self.selected_features_functions:
@@ -1324,4 +1576,11 @@ class FeatureExtractor:
 
 
 if __name__ == "__main__":
-    pass
+    output_dir = r"C:\Users\Ahmed Guebsi\Desktop\Data_test"
+    df_path = r"C:\Users\Ahmed Guebsi\Desktop\Data_test\vmd_channels_dataframe.pkl"
+    from  pandas import DataFrame , read_pickle
+    from pathlib import Path
+    import os
+    df: DataFrame = read_pickle(df_path)
+    print(df.shape)
+    print(df.head(60))

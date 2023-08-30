@@ -22,7 +22,7 @@ def import_data(fname_raw):
 
     assert data.shape[0] == 19
 
-    info = mne.create_info(19, 256, "eeg")
+    info = mne.create_info(19, 128, "eeg")
 
     raw = RawArray(data, info)
 
@@ -191,9 +191,42 @@ def calculate_asymmetry_ch(df_psd_band,left_ch,right_ch):
 
     return df_asymmetry
 
-
-
-
+def butter_bandpass_filter(data, lowcut, highcut, fs, order=2):
+    nyq = 0.5 * fs
+    low = lowcut /nyq
+    high = highcut/nyq
+    b, a = butter(order, [low, high], btype='band')
+    #print(b,a)
+    y = lfilter(b, a, data)
+    return y
+def calc_bands_power(x, dt, bands):
+    from scipy.signal import welch
+    f, psd = welch(x, fs=1. / dt)
+    power = {band: np.mean(psd[np.where((f >= lf) & (f <= hf))]) for band, (lf, hf) in bands.items()}
+    return power
+for i in np.arange(n):
+    alpha1 = butter_bandpass_filter(fft1[i, :], 8.1, 12.0, 256)
+    beta1 = butter_bandpass_filter(fft1[i, :], 16.0, 36.0, 256)
+    gamma1 = butter_bandpass_filter(fft1[i, :], 36.1, 80, 256)
+    delta1 = butter_bandpass_filter(fft1[i, :], 0.0, 4.0, 256)
+    sigma1 = butter_bandpass_filter(fft1[i, :], 12.1, 16.0, 256)
+    theta1 = butter_bandpass_filter(fft1[i, :], 4.1, 8.0, 256)
+    sumalpha1 = sum(abs(alpha1))
+    sumbeta1 = sum(abs(beta1))
+    sumgamma1 = sum(abs(gamma1))
+    sumdelta1 = sum(abs(delta1))
+    sumsigma1 = sum(abs(sigma1))
+    sumtheta1 = sum(abs(theta1))
+    objects = [sumalpha1, sumbeta1, sumgamma1, sumdelta1, sumsigma1, sumtheta1]
+    N = len(objects)
+    ra = range(N)
+    plt.title(signal_labels[i])
+    plt.autoscale
+    somestuffneeded = np.arange(6)
+    ticks = ['alpha','beta','gamma','delta','sigma','theta']
+    plt.xticks(somestuffneeded, ticks)
+    plt.bar(ra, objects)
+    plt.show()
 if __name__ == "__main__" :
     signal_filepath = str(Path(PATH_DATASET_MAT, get_mat_filename( 1, "normal")))
     print(signal_filepath)

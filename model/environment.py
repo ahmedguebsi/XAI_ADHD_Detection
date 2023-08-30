@@ -57,7 +57,7 @@ def get_brainwave_bands():
 
 additional_feature_names = ["psd", "mean", "std","MIN","MAX","MED","PEAK","SKEW","KURT","R1","RMS","M1","IQR","Q1","Q2","Q3","WL","IEEG","SPF","MOM2",
                             "MOM3","MAV","MAV1","MAV2","COV","CF","AAC","HURST","HjC","HA","HM","HFD"]
-entropy_names = ["PE", "AE", "SE", "FE","RE","TE","PEN","KEN","SHAN","LEN"]
+entropy_names = ["PE", "AE", "SE", "FE","RE","TE","PEN","KEN","SHAN","LEN","KE"]
 feature_names = entropy_names + additional_feature_names
 feature_indices = dict((name, i) for i, name in enumerate(feature_names))
 

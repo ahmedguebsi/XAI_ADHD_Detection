@@ -1,4 +1,5 @@
 import scipy.io as sio
+import h5py
 import numpy as np
 import pandas as pd
 from scipy import signal
@@ -14,6 +15,13 @@ from mne import Epochs
 from mne.preprocessing import ICA
 import time
 from vmdpy import VMD
+
+import dsatools
+from dsatools import operators
+import dsatools.utilits as ut
+from dsatools import decomposition
+
+
 from pandas import DataFrame, set_option
 #from mne.io.egi  import write_raw_egi
 from mne.filter import notch_filter, filter_data
@@ -22,13 +30,14 @@ from typing import List, Union
 from tqdm import tqdm
 import EntropyHub as eh
 import antropy as an
-
+import dit
+from dit.other import tsallis_entropy, renyi_entropy
 from pandas import DataFrame, Series, read_pickle, set_option
-from features_extraction import log_entropy,log2_entropy,permutation_entropy,fuzzy_entropy,kraskov_entropy, \
+from features_extraction import log_entropy,log2_entropy,permutation_entropy,cal_permutation_entropy,permut_entropy,fuzzy_entropy,kraskov_entropy,krask_entropy, cal_shannon_entropy,\
     cor_cond_entropy, spectral_entropy, svd_entropy, approximate_entropy, sample_entropy,shannon_entropy, cond_entropy,\
-    tsalis_entropy,reyni_entropy, hjorth,hurst, hurst_x,hfd,HFD,hjorth_mob,hjorth_params, spectral_flatness, calculate_renyi_entropy,\
+    tsalis_entropy,reyni_entropy, hjorth,hurst, hurst_x,hfd,HFD,higuchi_fractal_dimension,hjorth_mob,hjorth_params,hjorthParameters, spectral_flatness, calculate_renyi_entropy,\
     calculate_tsallis_entropy,calculate_log_energy_entropy,sure_entropy, calculate_prob_distribution, bin_power,calculate_shannon_entropy,\
-    psd_welch
+    psd_welch, lyapunov,outcome_probabalities,conditional_entropy,cal_renyi_entropy,cal_log_energy_entropy,cal_tsallis_entropy,cal_conditional_entropy\
 
 
 from environment import (ADHD_STR, FREQ, USE_REREF, LOW_PASS_FILTER_RANGE_HZ,
@@ -54,10 +63,34 @@ signal_duration = SIGNAL_DURATION_SECONDS_DEFAULT
 channels = Chs
 data_directory = "ADHD_part1"
 output_dir = r"C:\Users\Ahmed Guebsi\Desktop\Data_test"
-
-#PATH_DATASET_MAT= r"C:\Users\Ahmed Guebsi\Downloads\ADHD_Data\ADHD_part1"
-#PATH_DATASET_MAT= r"C:\Users\Ahmed Guebsi\Downloads\ADHD_Data\ADHD_part1\v1p.mat"
 PATH_DATASET_MAT= r"C:\Users\Ahmed Guebsi\Downloads\ADHD_part1"
+
+
+
+datapath = r"C:\Users\Ahmed Guebsi\Downloads\data"# data file path
+def data_load(index):
+    directory = datapath + '\\d'
+    x_data, y_data = [], []
+    x_data = np.array(x_data)
+
+    for fileIndex in range(index):
+        filename = directory + str(fileIndex + 1) + '.mat'
+        feature = h5py.File(filename, mode='r')
+        a = list(feature.keys())
+        x_sub = feature[a[0]]
+        x_sub = np.array(x_sub)
+        if x_data.size == 0:
+            x_data = x_sub
+        else:
+            x_data = np.concatenate((x_data, x_sub), axis=2)
+
+    feature = h5py.File(datapath + '\\y_stim.mat', mode='r')
+    a = list(feature.keys())
+    y_data = feature[a[0]]
+    y_data = np.array(y_data)
+
+    return x_data, y_data
+
 
 def reference_data(raw, reference):
     raw.set_eeg_reference(ref_channels=reference, projection=False, ch_type='eeg', verbose=None)
@@ -65,8 +98,8 @@ def reference_data(raw, reference):
     return raw
 
 def downsample(raw, freq=250):
-	raw = raw.resample(sfreq=freq)
-	return raw, freq
+    raw = raw.resample(sfreq=freq)
+    return raw, freq
 
 def signal_crop(signal: BaseRaw, freq: float, signal_offset: float, signal_duration_wanted: float):
     signal_total_duration = floor(len(signal) / freq)
@@ -80,7 +113,7 @@ def signal_filter_notch(signal: BaseRaw, filter_hz):
 def low_high_pass_filter(signal: BaseRaw, l_freq, h_freq):
     return signal.copy().filter(l_freq=l_freq, h_freq=h_freq)
 
-def filt_data(eegData, lowcut, highcut, fs, order=7):
+def filt_data(eegData, lowcut, highcut, fs, order=6):
     nyq = 0.5 * fs
     low = lowcut / nyq
     high = highcut / nyq
@@ -124,6 +157,8 @@ def load_mat_data(signal_filepath):
     #eeg_signal = np.transpose(mat_data[filename])
 
     eeg_signal = np.transpose(last_value)
+    print("teeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeest",eeg_signal.shape)
+
 
     # Create the info dictionary
     n_channels, n_samples = eeg_signal.shape
@@ -135,6 +170,7 @@ def load_mat_data(signal_filepath):
 
     # Create the RawArray object
     raw = mne.io.RawArray(eeg_signal, info)
+    print("raaaaaaaaaaaaaaaaw",raw.get_data().shape)
 
     return raw, info, ch_names,eeg_signal
 
@@ -154,8 +190,8 @@ def preprocess_eeg_data(raw,info):
     signal_filtered = mne.io.RawArray(bandpass_filtered, info)
     return signal_filtered
 
-
 list_removed_components=[]
+
 def apply_ica(raw, info, plot_components=False, plot_scores=False,plot_sources=False, plot_overlay=False):
 
     raw.load_data()
@@ -194,7 +230,7 @@ def apply_ica(raw, info, plot_components=False, plot_scores=False,plot_sources=F
     ica_v.exclude = eog_indices
     print(ica_v.exclude)
 
-    list_removed_components.append(ica_v.exclude)
+    #list_removed_components.append(ica_v.exclude)
 
     if plot_scores:
         p = ica_v.plot_scores(eog_scores);
@@ -223,6 +259,7 @@ def plot_raw(raw, raw_filtered, raw_ica):
                    sampling_rate=raw.info["sfreq"])
 
     return result
+
 def get_duration():
     duration = []
     nb_epoch_list=[]
@@ -238,20 +275,13 @@ def get_duration():
             print(type(raw))
             print(raw.info)
             dur = raw._data.shape[1] / raw.info["sfreq"]
+            dur = round((raw._data.shape[1] - 1/ raw.info["sfreq"]),3)
 
-            if int(dur) % 4 == 0:
-                nb_epoch = dur // 4
-                nb_epoch_four.append(nb_epoch)
-            else:
-                nb_epoch = (dur // 4 )+ 1
-
-                nb_epoch_list.append(nb_epoch)
+            duration_epoch = dur // 4 * 4
+            nb_epoch_list.append(duration_epoch//4)
             duration.append(dur)
-            print(duration)
-            print(nb_epoch_list)
-            print(len(nb_epoch_list))
-            print(nb_epoch_four)
-            print(len(duration))
+
+
         #print(sum(duration))
     return int(sum(duration)), int(sum(nb_epoch_list)), int(sum(nb_epoch_four))
 
@@ -331,7 +361,7 @@ def apply_vmd(signal):
     Nmodes = 5  # 5 modes
     DC = 0  # no DC part imposed
     init = 1  # initialize omegas uniformly
-    tol = 1e-7
+    tol = 1e-3
     #% VMD features
     #DC = np.mean(fp)    no DC part imposed
     tic = time.time()
@@ -381,6 +411,7 @@ def VMD(f, alpha, tau, K, DC, init, tol):
 
     # Period and sampling frequency of input signal
     fs = 1. / len(f)
+    #fs=128
     print("sampling frequency: ", fs)
     print("signal length: ", len(f))
     ltemp = len(f) // 2
@@ -502,7 +533,47 @@ def VMD(f, alpha, tau, K, DC, init, tol):
 
     return u, u_hat, omega
 
-#print(get_duration())
+def zero_crossing(X, th=0):
+    zcross = 0
+    for cont in range(len(X) - 1):
+        can = X[cont] * X[cont + 1]
+        can2 = abs(X[cont] - X[cont + 1])
+        if can < 0 and can2 > th:
+            zcross = zcross + 1
+    return zcross
+# threshold the signal and make it discrete, normalize it and then compute entropy
+def shannonEntropy(eegData, bin_min, bin_max, binWidth):
+
+    H = np.zeros((eegData.shape[0], eegData.shape[2]))
+    for chan in range(H.shape[0]):
+        for epoch in range(H.shape[1]):
+            counts, binCenters = np.histogram(eegData[chan,:,epoch], bins=np.arange(bin_min+1, bin_max, binWidth))
+            nz = counts > 0
+            prob = counts[nz] / np.sum(counts[nz])
+            H[chan, epoch] = -np.dot(prob, np.log2(prob/binWidth))
+    return H
+
+# Extract the tsallis Entropy
+def tsalisEntropy(eegData, bin_min, bin_max, binWidth, orders=[2]):
+  H = [np.zeros((eegData.shape[0], eegData.shape[2]))] * len(orders)
+  for chan in range(H[0].shape[0]):
+    for epoch in range(H[0].shape[1]):
+      counts, bins = np.histogram(eegData[chan, :, epoch], bins=np.arange(-200 + 1, 200, 2))
+      dist = dit.Distribution([str(bc).zfill(5) for bc in bins[:-1]], counts / sum(counts))
+      for ii, order in enumerate(orders):
+        H[ii][chan, epoch] = tsallis_entropy(dist, order)
+  return H
+
+# Extract the Reyni Entropy
+def ReyniEntropy(eegData, bin_min, bin_max, binWidth, orders = [1]):
+    H = [np.zeros((eegData.shape[0], eegData.shape[2]))]*len(orders)
+    for chan in range(H[0].shape[0]):
+        for epoch in range(H[0].shape[1]):
+            counts, bins = np.histogram(eegData[chan,:,epoch], bins=np.arange(-200+1, 200, 2))
+            dist = dit.Distribution([str(bc).zfill(5) for bc in bins[:-1]],counts/sum(counts))
+            for ii,order in enumerate(orders):
+                H[ii][chan,epoch] = renyi_entropy(dist,order)
+    return H
 
 
 feature_extractor = FeatureExtractor(selected_feature_names=feature_names)
@@ -529,13 +600,27 @@ for freq_name, freq_range in filter_frequencies.items():
     signal_preprocessor.register_preprocess_procedure(freq_name, procedure=procedure, context={"freq_filter_range": freq_range})
 
 plot_channel_data = False
-plot_raw= False
+plot_raw_eeg= False
 plot_hilbert = False
 plot_prob_dist =False
 
 list_inst_amp=[]
 list_inst_freq=[]
 list_inst_hilbert=[]
+renyi_entropy_all_channels_list=[]
+
+shannon_entropy_all_channels_list=[]
+
+tsallis_entropy_all_channels_list=[]
+
+log_energy_entropy_all_channels_list=[]
+df_channels =pd.DataFrame(columns=channels)
+df_kraskov =pd.DataFrame(columns=channels)
+
+shannon_dataframe= pd.DataFrame(columns=channels)
+tsallis_dataframe= pd.DataFrame(columns=channels)
+renyi_dataframe= pd.DataFrame(columns=channels)
+
 training_cols = get_column_names(channels, feature_extractor.get_feature_names(), signal_preprocessor.get_preprocess_procedure_names())
 df_dict = {k: [] for k in ["is_adhd", "child_id", "epoch_id", *training_cols]}
 duration=[]
@@ -586,7 +671,7 @@ for child_id, attention_state in tqdm(list(product(range(0, children_num), atten
             plot_raw(raw,signal_processed,signal_processed_ica)
         # By default epoch duration = 1
 
-        epochs = make_fixed_length_epochs(signal_processed_ica, duration=4.0, preload=True, overlap=2.0, verbose=False)
+        epochs = make_fixed_length_epochs(signal_processed, duration=4.0, preload=True,verbose=False)
         print(epochs)
         print(len(epochs))  # 47
         #epochs.plot(picks="all", scalings="auto", n_epochs=3, n_channels=19, title="plotting epochs")
@@ -743,4 +828,20 @@ for child_id, attention_state in tqdm(list(product(range(0, children_num), atten
 
 if __name__ == "__main__":
     print(get_duration())
-    #pass
+
+    signal_filepath = r"C:\Users\Ahmed Guebsi\Downloads\data\d1.mat"
+    feature = h5py.File(signal_filepath, mode='r')
+    a = list(feature.keys())
+    print(a)
+    x_sub = feature[a[0]]
+    x_sub = np.array(x_sub)
+    print(x_sub.shape)
+
+    x_data, y_data = data_load(7)
+    print(x_data.shape)
+    print(y_data.shape)
+    print(y_data[0])
+    print(y_data[1][9900:10000])
+    y_data = np.swapaxes(y_data, 1, 0)
+    print(y_data[0:600, 1:3])
+

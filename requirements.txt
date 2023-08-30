@@ -14,6 +14,7 @@ ipykernel
 antropy
 tabulate
 pyedflib
+EDFlib-Python
 dit
 mne-features
 mne-icalabel
@@ -32,3 +33,10 @@ interpret
 dash
 plotly
 #pyinform-0.2.0 (entropies calculation)
+
+
+eeg-filters
+pyQt5
+pyqtgraph
+loguru
+torchsummary

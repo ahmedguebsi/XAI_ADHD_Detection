@@ -18,6 +18,7 @@ def get_delay(phase):
     """
     phase = phase
     m, n = phase.shape
+    print("phaseee shape", phase.shape)
     c1 = n*(m-2)
     r_phase = np.roll(phase, 2, axis=0)
     m = np.multiply(phase, r_phase)[1:-1]
@@ -41,9 +42,14 @@ def get_phase(time_series):
     phase : numpy.ndarray
         m x n ndarray : m: number of channels, n: number of samples
     """
+    print("ts shape", time_series.shape)
+    time_series =np.transpose(time_series)
+    print("ts shape", time_series.shape)
 
     complex_series = hilbert(time_series, axis=0)
-    phase = np.angle(complex_series)
+    #phase = np.angle(complex_series)
+    phase = np.unwrap(np.angle(complex_series)) # correction trial
+    print("phase shapee", phase.T.shape)
     return phase
 
 def get_discretized_phase(phase, binsize):
@@ -64,6 +70,7 @@ def get_discretized_phase(phase, binsize):
 
     """
     d_phase = np.ceil(phase / binsize).astype(np.int32)
+    print("dphaseeeeeeeeeeeeeeeee", d_phase.shape)
     return d_phase
 
 
@@ -84,6 +91,7 @@ def get_binsize(phase, c = 3.49):
     """
 
     m, n = phase.shape
+    print("phase shape biiiiiiiiiiiiiiiiin", phase.shape)
     binsize = c * np.mean(np.std(phase, axis=0, ddof=1)) * m ** (-1.0 / 3)
     return binsize
 
@@ -125,10 +133,11 @@ def compute_PTE(phase, delay):
         m x m matrix containing the PTE value for each channel pair
     """
 
-    phase = np.transpose(phase)
+    #phase = np.transpose(phase)
     m, n = phase.shape
     PTE = np.zeros((m,m), dtype=float)
     print("phase shape",phase.shape)
+    print("m",m)
     for i in range(0, m):
         for j in range(0, m):
 
@@ -143,18 +152,18 @@ def compute_PTE(phase, delay):
             print(P_y.shape)
             np.add.at(P_y, [y], 1)
 
-            #P_ypr_y = np.zeros([ypr.max()+1, y.max()+1]) # changed y=ypr
-            P_ypr_y = np.zeros([max(ypr.max() + 1, y.max() + 1),max(ypr.max() + 1, y.max() + 1)])
+            P_ypr_y = np.zeros([ypr.max()+1, y.max()+1]) # changed y=ypr
+            #P_ypr_y = np.zeros([max(ypr.max() + 1, y.max() + 1),max(ypr.max() + 1, y.max() + 1)])
             print(P_ypr_y.shape)
             print("test",[ypr, y])
             np.add.at(P_ypr_y, [ypr, y], 1)
 
-            #P_y_x = np.zeros([y.max()+1, x.max()+1])
-            P_y_x=np.zeros([max(y.max()+1, x.max()+1),max(y.max()+1, x.max()+1)])
+            P_y_x = np.zeros([y.max()+1, x.max()+1])
+            #P_y_x=np.zeros([max(y.max()+1, x.max()+1),max(y.max()+1, x.max()+1)])
             np.add.at(P_y_x, [y, x], 1)
             print("Px", P_y_x.shape)
-            #P_ypr_y_x = np.zeros([ypr.max()+1, y.max()+1, x.max()+1]) #changed y=ypr
-            P_ypr_y_x = np.zeros([max(ypr.max() + 1, y.max() + 1,x.max()+1), max(ypr.max() + 1, y.max() + 1,x.max()+1),max(ypr.max() + 1, y.max() + 1,x.max()+1)])
+            P_ypr_y_x = np.zeros([ypr.max()+1, y.max()+1, x.max()+1]) #changed y=ypr
+            #P_ypr_y_x = np.zeros([max(ypr.max() + 1, y.max() + 1,x.max()+1), max(ypr.max() + 1, y.max() + 1,x.max()+1),max(ypr.max() + 1, y.max() + 1,x.max()+1)])
             np.add.at(P_ypr_y_x, [ypr, y, x], 1)
             print("Pxy", P_ypr_y_x.shape)
             P_y /= (m-delay)
@@ -229,7 +238,8 @@ def PTE(time_series):
     binsize = get_binsize(phase_inc)
     print("binsize",binsize)
     d_phase = get_discretized_phase(phase_inc, binsize)
-    print(d_phase)
+    print("d phase shape",d_phase.shape)
+
 
     return compute_dPTE_rawPTE(d_phase, delay)
 
@@ -258,5 +268,6 @@ def PTE_from_dataframe(data_frame):
 
 
 def PTE_from_mne(mne_raw):
-    data_frame = mne_raw.to_data_frame()
+    data_frame = mne_raw.to_data_frame(index='time')
+    print("df shape", data_frame.shape)
     return PTE_from_dataframe(data_frame)

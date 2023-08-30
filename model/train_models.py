@@ -1,12 +1,17 @@
 import warnings
+import numpy as np
+from itertools import chain, combinations, product
+from os import getcwd
+from typing import Dict, TypeVar
 from datetime import datetime
-from itertools import product
 from pathlib import Path
 from pandas import read_pickle, Series
 from pandas._config.config import set_option
 from pandas.core.frame import DataFrame
+from pandas import read_pickle, read_csv
+
 from sklearn.exceptions import ConvergenceWarning
-from sklearn.metrics import accuracy_score, f1_score, precision_score, auc, roc_curve, recall_score,confusion_matrix
+from sklearn.metrics import accuracy_score, f1_score, precision_score, auc, roc_curve, recall_score,confusion_matrix,matthews_corrcoef, classification_report
 from sklearn.model_selection import GridSearchCV, LeaveOneGroupOut, KFold, cross_validate, train_test_split
 from sklearn.preprocessing import MinMaxScaler
 from tabulate import tabulate
@@ -15,7 +20,7 @@ from tqdm import tqdm
 from models import model_knn, model_mlp, model_rfc, model_svc
 from environment import training_columns_regex
 #from utils_file_saver import TIMESTAMP_FORMAT, save_model
-from helper_functions import (get_mat_filename, glimpse_df, serialize_functions,isnull_any, rows_with_null)
+from helper_functions import (get_mat_filename, glimpse_df, serialize_functions,isnull_any, rows_with_null, stdout_to_file)
 
 timestamp = datetime.today()
 warnings.filterwarnings(action="ignore", category=ConvergenceWarning)
@@ -125,22 +130,60 @@ def roc_auc_score_none(y_true, y_pred):
 
 
 #df_path=r"C:\Users\Ahmed Guebsi\Downloads\complete-clean-2022-02-26-is_complete_dataset_true___brains_true___reref_false.pickle"
-df_path=r"C:\Users\Ahmed Guebsi\Desktop\Data_test\.clean_raw_df_adhd.pkl"
+df_path=r"C:\Users\Ahmed Guebsi\Desktop\Data_test\hilbert_dataframe.pkl"
+#df_path=r"C:\Users\Ahmed Guebsi\Desktop\Data_test\modified_dataframe.pkl"
+#df_path=r"C:\Users\Ahmed Guebsi\Desktop\Data_test\clean_raw_df_adhd_modified.pkl"
+#df_path=r"C:\Users\Ahmed Guebsi\Desktop\Data_test\no_fp1.pkl"
+
 df: DataFrame = read_pickle(df_path)
 print(isnull_any(df))
 #glimpse_df(df)
 print(rows_with_null(df))
-X = df.drop("is_adhd", axis=1)
-y = df.loc[:, "is_adhd"]
+print("shape", df.shape)
+columns_to_replace = df.columns[df.columns.str.contains('RE|TE|SHAN|LEN|CE')]
+print(len(columns_to_replace))
 
-training_columns = list(df.iloc[:, df.columns.str.contains(training_columns_regex)].columns)
+# Check for infinity in the DataFrame
+#has_infinity = df.isin([np.inf, -np.inf]).any().any()
+
+# Check for infinity in the DataFrame
+has_infinity = df.isin([np.inf, -np.inf]).any()
+
+# Check for values too large for float64 dtype
+dtype_max_value = np.finfo(np.float64).max
+has_large_values = df.max() > dtype_max_value
+
+# Get column names with infinity or large values
+columns_with_infinity = df.columns[has_infinity].tolist()
+columns_with_large_values = df.columns[has_large_values].tolist()
+
+# Print column names
+if columns_with_infinity:
+    print("Columns with infinity:", columns_with_infinity)
+
+if columns_with_large_values:
+    print("Columns with values too large for dtype('float64'):", columns_with_large_values)
+
+
+print("has_infinity", has_infinity)
+df_without_nulls = df.dropna(axis=1)
+df_without_nulls= df_without_nulls.drop(columns_with_infinity, axis=1)
+#modified_df = df_without_nulls.drop(columns=columns_to_replace)
+
+columns_to_replace = df.columns[df.columns.str.contains('Fp1')]
+print(df[columns_to_replace].shape)
+print(df[columns_to_replace].head(60))
+X = df_without_nulls.drop(["child_id","epoch_id","is_adhd"], axis=1)
+y = df_without_nulls.loc[:, "is_adhd"]
+
+training_columns = list(df_without_nulls.iloc[:, df_without_nulls.columns.str.contains(training_columns_regex)].columns)
 # Remove rows with null values
 
 
 #strategies = {"leaveoneout": loo_generator, "split": split_generator}
 strategies = {"cv": cross_validation_generator, "split": split_generator}
 scorings = ["f1"]
-models = [model_svc, model_rfc, model_mlp, model_knn]
+models = [ model_rfc]
 #models = [model_mlp]
 
 training_generators = map(lambda strategy_name: (strategy_name, strategies[strategy_name]),strategies)
@@ -163,6 +206,7 @@ for (training_generator_name, training_generator), model, scoring in tqdm(list(p
         print(type(y_true_test))
         y_trues.append(y_true_test)
         y_preds.append(y_pred_test)
+
 
         #accuracy = accuracy_score(y_trues, y_preds)
         #f1_score = f1_score(y_true_test, y_pred_test)
