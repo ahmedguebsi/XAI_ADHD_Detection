@@ -5,7 +5,7 @@ import os
 import cv2
 from scipy.io import savemat
 from matplotlib import pyplot as plt
-
+from scipy import stats
 
 def get_saliency_map(model, image, class_idx):
     image = tf.convert_to_tensor(image, dtype=tf.float32)
@@ -13,7 +13,9 @@ def get_saliency_map(model, image, class_idx):
     with tf.GradientTape() as tape:
         tape.watch(image)
         predictions = model(image)
-        loss = predictions[:, class_idx]
+        print(predictions)
+        print('predictions.shape: ', predictions.shape)
+        loss = predictions[ class_idx]
 
     # Get the gradients of the loss w.r.t to the input image.
     gradient = tape.gradient(loss, image)
@@ -36,9 +38,10 @@ def test_visualize(params, X_test, y_test):
     X_test = X_test.reshape(trial_num, params['chans'], params['samples'], params['kernels'])
     test = X_test[0:trial_num, :, :, :]
     y_res = y_test[0:trial_num]
+    print(y_res.shape)
 
     # test = np.mean(test, axis=0)
-    test = np.reshape(test, (trial_num, 56, 385, 1))
+    test = np.reshape(test, (trial_num, 19, 512, 1))
     print('test.shape', test.shape)
     print('y_res', y_res)
 
@@ -106,11 +109,12 @@ def test_visualize(params, X_test, y_test):
     # # ---------------------------------saliency map-----------------------
     # 通过网络层的名字找到layer_idx
     linear_model = tf.keras.Model(inputs=model.input, outputs=model.layers[-2].output)
-    class_idx = y_res.argmax(axis=-1)
+    #class_idx = y_res.argmax(axis=-1)
+    class_idx =y_res
     print('class_idx: ', class_idx)
     grads = []
     for idx in range(trial_num):
-        grads.append(get_saliency_map(linear_model, np.reshape(test[idx], (1, 56, 385, 1)), class_idx[idx]))
+        grads.append(get_saliency_map(linear_model, np.reshape(test[idx], (1, 19, 512, 1)), class_idx[idx]))
     # grads.append(get_saliency_map(linear_model, np.reshape(test, (1, 56, 385, 1)), class_idx[1]))  # 此处为1次试次trial的简化，可能经过mean处理
     # heatmap = np.squeeze(grads)
     # print('grads.shape: ', heatmap.shape)
@@ -147,6 +151,5 @@ def test_visualize(params, X_test, y_test):
     # 根据main函数中 测试可视化数据来源 给数据起名字 对应上即可
     file_name = 'sub-add-5.mat'
     savemat(file_name, {'origin': origin, 'grads': grads})
-
 
 

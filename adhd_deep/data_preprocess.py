@@ -27,7 +27,7 @@ def data_load(index):
 
     return x_data, y_data
 
-# ——————————————————k折交叉验证划分——————————————————————
+
 def get_k_fold_data(k, i, X, y):
     assert k > 1
     X, y = easy_shuffle(X, y)
@@ -55,7 +55,6 @@ def get_k_fold_data(k, i, X, y):
     print("y_valid.shape k fold: ", y_valid.shape)
     return X_train, y_train, X_valid, y_valid
 
-# ——————————————————数据降维—————————————————————
 def flatten_test(input_arr, output_arr=None):
     if output_arr is None:
         output_arr = []
@@ -77,7 +76,6 @@ def easy_shuffle(X, y):
     print('shuffle y: ', y.shape)
     return X, y
 
-# ——————————————————将数据 按受试者标签id 划分—————————————————————
 def split_data(X_data, y_index, y_label, subject_id, isShuffle=False):
     # split subject, acquire test-subject data to test model
     # y_test_idx = []
